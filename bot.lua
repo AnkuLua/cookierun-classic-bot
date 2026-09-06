@@ -57,6 +57,7 @@ local function get_detection_stage_names(group_name, exclude)
 
     if group_name == "IN_GAME" then
         for _, stage_name in ipairs(DETECTION_ALWAYS_STAGES or {}) do
+            --print("IN_GAME" .. stage_name)
             add_stage(stage_name)
         end
     end
@@ -131,6 +132,7 @@ function main()
     local last_stage = nil
     local is_first_game = true
     local detection_group = "PRE_GAME"
+    --local detection_group = "IN_GAME"
     local last_detected_time = os.time()
     local session_start_time = os.time()
     local session_reset_interval = random_uniform(SESSION_RESET_INTERVAL[1], SESSION_RESET_INTERVAL[2])
@@ -140,6 +142,7 @@ function main()
 
     while true do
         local stage = detection.detect_stage(get_detection_stage_names(detection_group, relic_exclude))
+        usePreviousSnap(false)
         
         if stage == nil then
             local recovery_interval = DETECTION_RECOVERY_SCAN_INTERVAL[detection_group] or 5
@@ -147,12 +150,15 @@ function main()
                 stage = detection.detect_stage(nil, relic_exclude)
                 last_detected_time = os.time()
             end
+            print("stage == nil")
         else
             last_detected_time = os.time()
+            print(" stage = " .. stage)
         end
 
         if stage == last_stage then
-            sleep(0.1)
+            sleep(1)
+            last_stage = nil
         else
             last_stage = stage
 
@@ -337,4 +343,7 @@ function main()
         sleep(0.25)
     end
 end
+--actions.handle_anti_bot(); scriptExit("end")
+--m = parseRegion(STAGE_ANTI_BOT_REGION):exists("ANTI_BOT_1.png", 1)
+--m:highlight(1)
 main()

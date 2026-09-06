@@ -22,7 +22,7 @@ local function getPattern(filename)
     return templateCache[filename]
 end
 
-local function parseRegion(regArray)
+function parseRegion(regArray)
     if not regArray then return nil end
     local x1, y1, x2, y2 = regArray[1], regArray[2], regArray[3], regArray[4]
     return Region(x1, y1, x2 - x1, y2 - y1)
@@ -78,6 +78,7 @@ function detect_stage(stage_names, exclude)
     end
 
     for _, stage_name in ipairs(stage_names) do
+        --print("stage_name "  .. stage_name)
         if not excludeSet[stage_name] then
             local template_files = STAGE_TEMPLATES[stage_name]
             local searchReg = parseRegion(STAGE_REGIONS[stage_name]) or getAppUsableScreenArea()
