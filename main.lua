@@ -22,7 +22,7 @@ function convertSegmentedString(val)
 end
 
 -- Override global print with timestamp logging
-local statusReg = Region(0, 0, 1280, 100)
+local statusRegion = Region(0, 0, 1280, 100)
 function print(...)
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local args = { ... }
@@ -34,8 +34,14 @@ function print(...)
 
     _original_print("[" .. timestamp .. "]", unpack(formattedArgs))
     if (type(unpack(formattedArgs)) == "string") then
-        statusReg:highlight(unpack(formattedArgs), 1)
+        statusRegion:highlight(unpack(formattedArgs), 1)
     end
+end
+
+-- Override global sleep with status region showing
+__orignial_sleep__ = sleep
+function sleep(seconds)
+    statusRegion:highlight("sleep " .. seconds .. " seconds", seconds)
 end
 
 -- Entry point execution (requires bot.lua in the same directory)

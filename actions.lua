@@ -205,24 +205,28 @@ end
 function actions.handle_anti_bot()
     print("🤖 Solving Anti-Bot captcha...")
     local card_coords = {
-        config.ANTI_BOT_CARD_POS_1, config.ANTI_BOT_CARD_POS_2, config.ANTI_BOT_CARD_POS_3,
-        config.ANTI_BOT_CARD_POS_4, config.ANTI_BOT_CARD_POS_5, config.ANTI_BOT_CARD_POS_6,
+        ANTI_BOT_CARD_POS_1, ANTI_BOT_CARD_POS_2, ANTI_BOT_CARD_POS_3,
+        ANTI_BOT_CARD_POS_4, ANTI_BOT_CARD_POS_5, ANTI_BOT_CARD_POS_6,
     }
 
-    local odd_indices = detection.detect_anti_bot_odd_cards()
-    print(string.format("🃏 Found odd cards: Card %d and Card %d", odd_indices[1] + 1, odd_indices[2] + 1))
+    repeat
+        local odd_indices = detection.detect_anti_bot_odd_cards()
+        print(string.format("🃏 Found odd cards: Card %d and Card %d", odd_indices[1] + 1, odd_indices[2] + 1))
 
-    for _, zero_idx in ipairs(odd_indices) do
-        local idx = zero_idx + 1
-        local cx, cy = card_coords[idx][1], card_coords[idx][2]
-        local margin = 20
-        local tx = math.random(cx + margin, cx + config.ANTI_BOT_CARD_WIDTH - margin)
-        local ty = math.random(cy + margin, cy + config.ANTI_BOT_CARD_HEIGHT - margin)
-        
-        print(string.format("  👆 Tapping Card %d at (%d, %d)", idx, tx, ty))
-        click(Location(tx, ty))
-        randomSleep(10.0, 15.0)
-    end
+        for _, zero_idx in ipairs(odd_indices) do
+            local idx = zero_idx + 1
+            print(idx)
+            local cx, cy = card_coords[idx][1], card_coords[idx][2]
+            local margin = 20
+            local tx = math.random(cx + margin, cx + ANTI_BOT_CARD_WIDTH - margin)
+            local ty = math.random(cy + margin, cy + ANTI_BOT_CARD_HEIGHT - margin)
+
+            print(string.format("  👆 Tapping Card %d at (%d, %d)", idx, tx, ty))
+            click(Location(tx, ty))
+            randomSleep(1.0, 1.0)
+        end
+
+    until (not exists(STAGE_ANTI_BOT_TEMPLATE[1], 1))
 
     print("✅ Anti-Bot captcha solved!")
     randomSleep(0.8, 1.4)

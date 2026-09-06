@@ -121,13 +121,14 @@ function detect_anti_bot_odd_cards()
     end
 
     -- Compare regions using dynamic screen snapshots
+    usePreviousSnap(false)
     for i = 1, n do
         local snapshotPath = string.format("temp_card_%d.png", i)
         cardRegions[i]:save(snapshotPath)
         
         for j = 1, n do
             if i ~= j then
-                local match = cardRegions[j]:exists(Pattern(snapshotPath):similar(0.5))
+                local match = cardRegions[j]:exists(Pattern(snapshotPath):similar(0.5), 1)
                 sim[i][j] = match and match:getScore() or 0.0
             end
         end
