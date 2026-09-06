@@ -1,0 +1,341 @@
+local actions = require("actions")
+local config = require("config")
+local detection = require("detection")
+
+-- Utility to process/convert segmented string arguments or table elements
+function convertSegmentedString(val)
+    if type(val) == "table" then
+        local converted = {}
+        for k, v in pairs(val) do
+            converted[k] = convertSegmentedString(v)
+        end
+        return converted
+    end
+    return tostring(val)
+end
+
+local BOOST_CHOICES = {
+    { "Double Coins", BOOST_DOUBLE_COINS_TEMPLATE },
+    { "+15% Score Bonus", BOOST_15P_SCORE_BONUS_TEMPLATE },
+    { "-15% HP Drain", BOOST_M15P_HP_DRAIN_TEMPLATE },
+    { "Revive Once with 80 HP", BOOST_REVIVE_ONCE_WITH_80HP_TEMPLATE },
+    { "70% Crush Chance", BOOST_70P_CRUSH_CHANCE_TEMPLATE },
+    { "+17% Base Speed", BOOST_17P_BASE_SPEED_TEMPLATE },
+    { "Gold Coin Magic", BOOST_GOLD_COIN_MAGIC_TEMPLATE },
+    { "-30% Collision Damage", BOOST_M30P_COLLISION_DAMAGE_TEMPLATE },
+    { "+20% HP from Potions", BOOST_20P_HP_FROM_POTIONS_TEMPLATE },
+    { "Magnetic Aura", BOOST_MAGNETIC_AURA_TEMPLATE },
+    { "2 Pit Lifts", BOOST_2PIT_LIFTS_TEMPLATE },
+}
+
+local function random_uniform(min_val, max_val)
+    return min_val + math.random() * (max_val - min_val)
+end
+
+local function get_detection_stage_names(group_name, exclude)
+    local stage_names = {}
+    local seen = {}
+
+    local function add_stage(name)
+        if not seen[name] then
+            seen[name] = true
+            table.insert(stage_names, name)
+        end
+    end
+
+    if group_name ~= "IN_GAME" then
+        for _, stage_name in ipairs(DETECTION_ALWAYS_STAGES or {}) do
+            add_stage(stage_name)
+        end
+    end
+
+    if DETECTION_GROUPS and DETECTION_GROUPS[group_name] then
+        for _, stage_name in ipairs(DETECTION_GROUPS[group_name]) do
+            add_stage(stage_name)
+        end
+    end
+
+    if group_name == "IN_GAME" then
+        for _, stage_name in ipairs(DETECTION_ALWAYS_STAGES or {}) do
+            add_stage(stage_name)
+        end
+    end
+
+    if exclude then
+        local filtered = {}
+        for _, s in ipairs(stage_names) do
+            if not exclude[s] then
+                table.insert(filtered, s)
+            end
+        end
+        return filtered
+    end
+
+    return stage_names
+end
+
+local function prompt_user_options()
+    print("⚙️ --- Bot Options ---")
+    
+    local boost_names = {}
+    for _, choice in ipairs(BOOST_CHOICES) do
+        table.insert(boost_names, choice[1])
+    end
+
+    dialogInit()
+    addCheckBox("use_fast_start", "⚡ Use Fast Start (buy + use)", false)
+    newRow()
+    addCheckBox("use_cookie_relay", "🍪 Use Cookie Relay (buy + use)", false)
+    newRow()
+    addCheckBox("use_desired_random_boost", "🎲 Use Desired Random Boost (buy + use)", false)
+    newRow()
+    addTextView("Select Desired Random Boost:")
+    --newRow()
+    addSpinner("selected_boost_name", boost_names, boost_names[1])
+    newRow()
+    addCheckBox("detect_relic", "🏺 Detect Relic (open + claim)", true)
+    dialogShow("CookieRun Classic Bot Options")
+
+    local chosen_boost = BOOST_CHOICES[1]
+    for _, choice in ipairs(BOOST_CHOICES) do
+        if choice[1] == selected_boost_name then
+            chosen_boost = choice
+            break
+        end
+    end
+
+    return {
+        use_fast_start = use_fast_start,
+        use_cookie_relay = use_cookie_relay,
+        use_desired_random_boost = use_desired_random_boost,
+        desired_boost_template = chosen_boost[2],
+        desired_boost_name = use_desired_random_boost and chosen_boost[1] or nil,
+        detect_relic = detect_relic,
+    }
+end
+
+detection = require("detection")
+config = require("config")
+function main()
+    print("🚀 CookieRun Classic Bot Started")
+    print("⚠️ Screen must be 1280x720 resolution for the bot to work properly.")
+
+    detection.load_templates()
+
+    local options = prompt_user_options()
+    local relic_exclude = nil
+    if not options.detect_relic then
+        relic_exclude = { RELIC_COMPLETE = true, RELIC_CLAIM = true }
+    end
+
+    local last_stage = nil
+    local is_first_game = true
+    local detection_group = "PRE_GAME"
+    local last_detected_time = os.time()
+    local session_start_time = os.time()
+    local session_reset_interval = random_uniform(SESSION_RESET_INTERVAL[1], SESSION_RESET_INTERVAL[2])
+    local last_lives_time = os.time()
+    local lives_interval = random_uniform(25 * 60, 35 * 60)
+    local pending_send_friend_life = false
+
+    while true do
+        local stage = detection.detect_stage(get_detection_stage_names(detection_group, relic_exclude))
+        
+        if stage == nil then
+            local recovery_interval = DETECTION_RECOVERY_SCAN_INTERVAL[detection_group] or 5
+            if (os.time() - last_detected_time) >= recovery_interval then
+                stage = detection.detect_stage(nil, relic_exclude)
+                last_detected_time = os.time()
+            end
+        else
+            last_detected_time = os.time()
+        end
+
+        if stage == last_stage then
+            sleep(0.1)
+        else
+            last_stage = stage
+
+            if stage == "MAINMENU" then
+                print("🎮 Detected Stage: MAINMENU")
+                print("⏳ Waiting 5 seconds for screen refresh...")
+                sleep(5)
+                
+                if pending_send_friend_life then
+                    print("💌 Sending friend lives after app reset...")
+                    actions.handle_send_friend_life()
+                    pending_send_friend_life = false
+                    last_lives_time = os.time()
+                    last_stage = nil
+                else
+                    local elapsed = os.time() - session_start_time
+                    if elapsed >= session_reset_interval then
+                        print(string.format("🔄 Session reset triggered after %.2fh — restarting app...", elapsed / 3600))
+                        actions.device_reset_app()
+                        sleep(5)
+                        actions.close_announcement_dialog()
+                        pending_send_friend_life = true
+                        session_start_time = os.time()
+                        session_reset_interval = random_uniform(SESSION_RESET_INTERVAL[1], SESSION_RESET_INTERVAL[2])
+                        last_lives_time = os.time()
+                        lives_interval = random_uniform(25 * 60, 35 * 60)
+                        detection_group = "PRE_GAME"
+                        last_stage = nil
+                        is_first_game = true
+                    else
+                        local lives_elapsed = os.time() - last_lives_time
+                        if lives_elapsed >= lives_interval then
+                            print(string.format("💌 ~30 min passed (%.1f min) — receiving and sending lives...", lives_elapsed / 60))
+                            actions.handle_quick_receive_and_send_lives()
+                            last_lives_time = os.time()
+                            lives_interval = random_uniform(25 * 60, 35 * 60)
+                            last_stage = nil
+                        elseif detection_group == "POST_GAME" then
+                            detection_group = "PRE_GAME"
+                            last_stage = nil
+                        else
+                            if not is_first_game then
+                                local delay = random_uniform(30, 60)
+                                print(string.format("⏳ Waiting for %.2f seconds before starting the next game...", delay))
+                                sleep(delay)
+                            end
+                            is_first_game = false
+                            actions.start_game()
+                            detection_group = "PRE_GAME"
+                        end
+                    end
+                end
+
+            elseif stage == "PURCHASE_ITEM" then
+                print("🛒 Detected Stage: PURCHASE_ITEM")
+                if options.use_fast_start then actions.purchase_fast_start() end
+                if options.use_cookie_relay then actions.purchase_cookie_relay() end
+                if options.use_desired_random_boost then
+                    actions.purchase_desired_random_boost(options.desired_boost_template, options.desired_boost_name)
+                end
+                actions.play_game()
+                detection_group = "IN_GAME"
+                sleep(0.2)
+                last_stage = nil
+
+            elseif stage == "GAME_START" then
+                print("🏁 Detected Stage: GAME_START")
+                if options.use_fast_start then actions.using_fast_start() end
+                detection_group = "IN_GAME"
+
+            elseif stage == "GAME_RELAY" then
+                print("🔄 Detected Stage: GAME_RELAY")
+                if options.use_cookie_relay then actions.using_cookie_relay() end
+                detection_group = "IN_GAME"
+
+            elseif stage == "GAME_COMPLETE" then
+                print("✅ Detected Stage: GAME_COMPLETE")
+                actions.complete_finish()
+                detection_group = "POST_GAME"
+
+            elseif stage == "MYSTERY_BOX" then
+                print("🎁 Detected Stage: MYSTERY_BOX")
+                actions.accept_mystery_box()
+                sleep(3)
+                detection_group = "POST_GAME"
+                last_stage = nil
+
+            elseif stage == "CONGRATULATIONS" then
+                print("🎉 Detected Stage: CONGRATULATIONS")
+                actions.accept_congratulations()
+                detection_group = "POST_GAME"
+                last_stage = nil
+
+            elseif stage == "LEVEL_UP" then
+                print("⬆️ Detected Stage: LEVEL_UP")
+                actions.accept_level_up()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "DAILY_CHECKIN" then
+                print("📅 Detected Stage: DAILY_CHECKIN")
+                actions.accept_daily_checkin()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "DAILY_CHECKIN_BOOST_SET" then
+                print("📅 Detected Stage: DAILY_CHECKIN_BOOST_SET")
+                actions.accept_daily_checkin_boost_set()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "DAILY_TREASURE" then
+                print("💎 Detected Stage: DAILY_TREASURE")
+                actions.accept_daily_treasure()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "DAILY_NEW" then
+                print("📰 Detected Stage: DAILY_NEW")
+                actions.accept_daily_new()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "ENTER_LEAGUE" then
+                print("🏆 Detected Stage: ENTER_LEAGUE")
+                actions.accept_enter_league()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "LEAGUE_RESULTS" then
+                print("🏆 Detected Stage: LEAGUE_RESULTS")
+                actions.accept_league_results()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "PREVIOUS_RANK_RESULTS" then
+                print("🏆 Detected Stage: PREVIOUS_RANK_RESULTS")
+                actions.accept_previous_rank_results()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "OVERTAKE_BREAK_SCORE" then
+                print("🏆 Detected Stage: OVERTAKE_BREAK_SCORE")
+                actions.accept_overtake_break_score()
+                detection_group = "POST_GAME"
+                last_stage = nil
+
+            elseif stage == "TOO_MANY_TREASURES" then
+                print("💎 Detected Stage: TOO_MANY_TREASURES")
+                actions.accept_too_many_treasures()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "RELIC_COMPLETE" then
+                print("🏺 Detected Stage: RELIC_COMPLETE")
+                actions.open_relic_complete()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "RELIC_CLAIM" then
+                print("🏺 Detected Stage: RELIC_CLAIM")
+                actions.accept_relic_claim()
+                detection_group = "PRE_GAME"
+
+            elseif stage == "ANTI_BOT" then
+                print("⚠️ Detected Stage: ANTI_BOT")
+                snapshot()
+                actions.handle_anti_bot()
+                usePreviousSnap(false)
+                last_stage = nil
+
+            elseif stage == "CONNECTION_LOST" then
+                print("🔌 Detected Stage: CONNECTION_LOST")
+                actions.device_reset_app()
+                sleep(5)
+                actions.close_announcement_dialog()
+                session_start_time = os.time()
+                session_reset_interval = random_uniform(SESSION_RESET_INTERVAL[1], SESSION_RESET_INTERVAL[2])
+                last_lives_time = os.time()
+                lives_interval = random_uniform(25 * 60, 35 * 60)
+                detection_group = "PRE_GAME"
+                last_stage = nil
+                is_first_game = true
+
+            elseif stage == "INACTIVE" then
+                print("💤 Detected Stage: INACTIVE")
+                actions.handle_inactive()
+                last_stage = nil
+            end
+        end
+
+        sleep(0.25)
+    end
+end
+
+main()
